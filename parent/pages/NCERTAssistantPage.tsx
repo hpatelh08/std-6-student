@@ -166,6 +166,54 @@ const QUICK_ACTIONS = [
   { label: 'Parent tip', icon: '👨‍👩‍👧', prompt: 'Give me a practical parent teaching tip for this chapter that I can use at home.' },
 ];
 
+function buildOfflineWorksheet(chapter: ChapterInfo): string {
+  const chapterTitle = chapter.name.replace(/\s+/g, ' ').trim();
+  const cleanContext = chapter.context.replace(/\s+/g, ' ').trim();
+
+  return [
+    `I could not reach the AI just now, so here is a simple worksheet for "${chapterTitle}":`,
+    '',
+    '1. What is this chapter mainly about?',
+    '2. Write two important ideas from the chapter.',
+    '3. Name one character, object, or example from the chapter.',
+    '4. What lesson does this chapter teach?',
+    '5. Write one real-life connection to this chapter.',
+    '',
+    `Hint: ${cleanContext}`,
+  ].join('\n');
+}
+
+function buildOfflineFallbackReply(prompt: string, chapter: ChapterInfo): string {
+  const lower = prompt.toLowerCase();
+
+  if (lower.includes('worksheet')) {
+    return buildOfflineWorksheet(chapter);
+  }
+
+  if (lower.includes('example')) {
+    return `A simple real-life example from "${chapter.name}" is: ${chapter.context}`;
+  }
+
+  if (lower.includes('parent tip')) {
+    return [
+      `Parent tip for "${chapter.name}":`,
+      'Read the chapter together.',
+      'Ask your child to say the main idea in their own words.',
+      'Then connect one idea to something from daily life.',
+    ].join('\n');
+  }
+
+  if (lower.includes('explain')) {
+    return [
+      `Here is a simple explanation of "${chapter.name}":`,
+      chapter.context,
+      'Ask your child to tell you the main idea in one short sentence.',
+    ].join('\n\n');
+  }
+
+  return `This chapter, "${chapter.name}", is about ${chapter.context}. Try asking about the main idea, a character, or the lesson it teaches.`;
+}
+
 /* ═══════════════════════════════════════════════════
    GLASS CARD STYLE
    ═══════════════════════════════════════════════════ */
@@ -759,6 +807,15 @@ const AskAiSection: React.FC<{
       { role: 'user' as const, content: text.trim() },
     ];
 
+    const applyFallback = () => {
+      const fallbackText = buildOfflineFallbackReply(text.trim(), selectedChapter);
+      setMessages(prev => prev.map(m => (
+        m.id === aiMsgId ? { ...m, text: fallbackText } : m
+      )));
+      setIsStreaming(false);
+      setError(null);
+    };
+
     try {
       await aiService.streamNCERTChat(
         history,
@@ -772,19 +829,12 @@ const AskAiSection: React.FC<{
         },
         (_full) => { setIsStreaming(false); },
         (err) => {
-          setIsStreaming(false);
-          const msg = err.message || '';
-          setError(
-            msg.includes('429') || msg.toLowerCase().includes('rate limit')
-              ? 'Server is busy right now. Please wait a moment and try again.'
-              : 'Something went wrong. Please try again.'
-          );
-          setMessages(prev => prev.filter(m => m.id !== aiMsgId));
+          console.warn('[AI Chat] Falling back to offline reply:', err);
+          applyFallback();
         },
       );
     } catch {
-      setIsStreaming(false);
-      setError('Failed to connect. Please check your connection.');
+      applyFallback();
     }
   }, [isStreaming, messages, selectedChapter, subject]);
 
